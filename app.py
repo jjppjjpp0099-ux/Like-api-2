@@ -311,18 +311,15 @@ def handle_requests():
     request_status = 1 if likes_increment > 0 else (2 if likes_increment == 0 else 3)
 
     response_data = {
-    "basicInfo": {
-        "nickname": player_nickname_from_profile,
-        "level": 0,
-        "liked": before_like_count,
-        "rank": "Heroic"
-    },
-    "socialInfo": {
-        "signature": f"Likes sent by API: {likes_increment}"
-    },
-    "status": 1
-}
-return jsonify(response_data)
+        "LikesGivenByAPI": likes_increment,
+        "LikesafterCommand": after_like_count,
+        "LikesbeforeCommand": before_like_count,
+        "PlayerNickname": player_nickname_from_profile,
+        "UID": actual_player_uid_from_profile,
+        "status": request_status,
+        "Note": f"Used visit token for profile check and {'random' if use_random else 'rotating'} batch of {len(tokens_for_like_sending)} tokens for like sending."
+    }
+    return jsonify(response_data)
 
 @app.route('/token_info', methods=['GET'])
 def token_info():
