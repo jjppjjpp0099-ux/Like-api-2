@@ -13,96 +13,169 @@ import threading
 import urllib3
 import random
 
-# Configuration
 TOKEN_BATCH_SIZE = 100
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Global State for Batch Management
 current_batch_indices = {}
 batch_indices_lock = threading.Lock()
 
-def get_next_batch_tokens(server_name, all_tokens):
-    if not all_tokens:
-        return []
-    
-    total_tokens = len(all_tokens)
-    
-    # If we have fewer tokens than batch size, use all available tokens
-    if total_tokens <= TOKEN_BATCH_SIZE:
-        return all_tokens
-    
-    with batch_indices_lock:
-        if server_name not in current_batch_indices:
-            current_batch_indices[server_name] = 0
-        
-        current_index = current_batch_indices[server_name]
-        
-        # Calculate the batch
-        start_index = current_index
-        end_index = start_index + TOKEN_BATCH_SIZE
-        
-        # If we reach or exceed the end, wrap around
-        if end_index > total_tokens:
-            remaining = end_index - total_tokens
-            batch_tokens = all_tokens[start_index:total_tokens] + all_tokens[0:remaining]
-        else:
-            batch_tokens = all_tokens[start_index:end_index]
-        
-        # Update the index for next time
-        next_index = (current_index + TOKEN_BATCH_SIZE) % total_tokens
-        current_batch_indices[server_name] = next_index
-        
-        return batch_tokens
-
-def get_random_batch_tokens(server_name, all_tokens):
-    """Alternative method: use random sampling for better distribution"""
-    if not all_tokens:
-        return []
-    
-    total_tokens = len(all_tokens)
-    
-    # If we have fewer tokens than batch size, use all available tokens
-    if total_tokens <= TOKEN_BATCH_SIZE:
-        return all_tokens.copy()
-    
-    # Randomly select tokens without replacement
-    return random.sample(all_tokens, TOKEN_BATCH_SIZE)
-
 def load_tokens(server_name, for_visit=False):
+
     if for_visit:
-        if server_name == "IND":
-            path = "token_ind_visit.json"
-        elif server_name in {"BR", "US", "SAC", "NA"}:
-            path = "token_br_visit.json"
-        else:
-            path = "token_bd_visit.json"
+        path = f"token_{server_name.lower()}_visit.json"
     else:
-        if server_name == "IND":
-            path = "token_ind.json"
-        elif server_name in {"BR", "US", "SAC", "NA"}:
-            path = "token_br.json"
-        else:
-            path = "token_bd.json"
+        path = f"token_{server_name.lower()}.json"
 
     try:
-        with open(path, "r") as f:
-            tokens = json.load(f)
-            if isinstance(tokens, list) and all(isinstance(t, dict) and "token" in t for t in tokens):
-                print(f"Loaded {len(tokens)} tokens from {path} for server {server_name}")
-                return tokens
-            else:
-                print(f"Warning: Token file {path} is not in the expected format. Returning empty list.")
-                return []
-    except FileNotFoundError:
-        print(f"Warning: Token file {path} not found. Returning empty list for server {server_name}.")
-        return []
-    except json.JSONDecodeError:
-        print(f"Warning: Token file {path} contains invalid JSON. Returning empty list.")
+        with open(path,"r") as f:
+            tokens=json.load(f)
+            return tokens
+    except:
         return []
 
 def encrypt_message(plaintext):
-    key = b'Yg&tc%DEuh6%Zc^8'
-    iv = b'6oyZDr22E3ychjM%'
+    key=b'Yg&tc%DEuh6%Zc^8'
+    iv=b'6oyZDr22E3ychjM%'
+    cipher=AES.new(key,AES.MODE_CBC,iv)
+    padded=pad(plaintext,AES.block_size)
+    enc=cipher.encrypt(padded)
+    return binascii.hexlify(enc).decode()
+
+def create_protobuf_message(uid,region):
+    m=like_pb2.like()
+    m.uid=int(uid)
+    m.region=region
+    return m.SerializeToString()
+
+def create_profile_payload(uid):
+    m=uid_generator_pb2.uid_generator()
+    m.krishna_=int(uid)
+    m.teamXdarks=1
+    return encrypt_message(m.SerializeToString())
+
+def decode_profile(binary):
+    try:
+        info=like_count_pb2.Info()
+        info.ParseFromString(binary)
+        return info
+    except:
+        return None
+
+def profile_request(payload,server,token):
+
+    if server=="IND":
+        url="https://client.ind.freefiremobile.com/GetPlayerPersonalShow"
+    else:
+        url="https://client.us.freefiremobile.com/GetPlayerPersonalShow"
+
+    headers={
+        "Authorization":f"Bearer {token}",
+        "Content-Type":"application/x-www-form-urlencoded"
+    }
+
+    try:
+        r=requests.post(url,data=bytes.fromhex(payload),headers=headers,verify=False)
+        return decode_profile(r.content)
+    except:
+        return None
+
+async def send_like(uid,server,url,tokens):
+
+    payload=create_protobuf_message(uid,server)
+    enc=encrypt_message(payload)
+
+    async with aiohttp.ClientSession() as session:
+
+        tasks=[]
+
+        for t in tokens:
+
+            headers={
+                "Authorization":f"Bearer {t['token']}",
+                "Content-Type":"application/x-www-form-urlencoded"
+            }
+
+            tasks.append(
+                session.post(url,data=bytes.fromhex(enc),headers=headers)
+            )
+
+        await asyncio.gather(*tasks)
+
+app=Flask(__name__)
+
+@app.route("/like")
+def like():
+
+    uid=request.args.get("uid")
+    server=request.args.get("server_name","IND").upper()
+
+    if not uid:
+        return jsonify({"error":"UID required"})
+
+    visit_tokens=load_tokens(server,True)
+    like_tokens=load_tokens(server,False)
+
+    if not visit_tokens:
+        return jsonify({"error":"visit token missing"})
+
+    payload=create_profile_payload(uid)
+
+    before=profile_request(payload,server,visit_tokens[0]["token"])
+
+    before_likes=0
+    level=0
+    nickname="Unknown"
+
+    if before and hasattr(before,"AccountInfo"):
+
+        before_likes=int(before.AccountInfo.Likes)
+        level=int(before.AccountInfo.Level)
+        nickname=str(before.AccountInfo.PlayerNickname)
+
+    if server=="IND":
+        like_url="https://client.ind.freefiremobile.com/LikeProfile"
+    else:
+        like_url="https://client.us.freefiremobile.com/LikeProfile"
+
+    loop=asyncio.new_event_loop()
+    loop.run_until_complete(send_like(uid,server,like_url,like_tokens[:TOKEN_BATCH_SIZE]))
+    loop.close()
+
+    after=profile_request(payload,server,visit_tokens[0]["token"])
+
+    after_likes=before_likes
+
+    if after and hasattr(after,"AccountInfo"):
+        after_likes=int(after.AccountInfo.Likes)
+
+    likes_given=after_likes-before_likes
+
+    response={
+
+        "basicInfo":{
+            "nickname":nickname,
+            "level":level,
+            "liked":before_likes,
+            "rank":"Heroic"
+        },
+
+        "socialInfo":{
+            "signature":"Free Fire Player"
+        },
+
+        "extra":{
+            "likes_before":before_likes,
+            "likes_after":after_likes,
+            "likes_given":likes_given
+        },
+
+        "status":1
+    }
+
+    return jsonify(response)
+
+if __name__=="__main__":
+    app.run(host="0.0.0.0",port=5001)    iv = b'6oyZDr22E3ychjM%'
     cipher = AES.new(key, AES.MODE_CBC, iv)
     padded_message = pad(plaintext, AES.block_size)
     encrypted_message = cipher.encrypt(padded_message)
