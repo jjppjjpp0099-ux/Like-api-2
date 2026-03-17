@@ -6,3 +6,5 @@ pycryptodome
 protobuf
 Werkzeug
 firebase-admin
+PyGithub
+python-telegram-bot
