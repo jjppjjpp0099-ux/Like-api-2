@@ -1,12 +1,7 @@
-Flask[async]
+Flask>=2.0.0
 requests
 aiohttp
-cchardet
-aiodns
-googleapis-common-protos
 pycryptodome
-protobuf
-Werkzeug
-firebase-admin
-PyGithub
-python-telegram-bot
+protobuf==4.21.0
+googleapis-common-protos
+Werkzeug>=2.0.0
