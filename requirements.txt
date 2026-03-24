@@ -1,6 +1,8 @@
 Flask[async]
 requests
 aiohttp
+cchardet
+aiodns
 googleapis-common-protos
 pycryptodome
 protobuf
