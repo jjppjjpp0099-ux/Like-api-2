@@ -8,6 +8,3 @@ Werkzeug
 firebase-admin
 PyGithub
 python-telegram-bot
-
-flask
-urllib3
