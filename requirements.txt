@@ -1,7 +1,8 @@
-Flask>=2.0.0
+Flask[async]
 requests
 aiohttp
-pycryptodome
-protobuf==4.21.0
 googleapis-common-protos
-Werkzeug>=2.0.0
+pycryptodome
+protobuf
+Werkzeug
+firebase-admin
